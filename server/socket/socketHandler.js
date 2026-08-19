@@ -1,19 +1,19 @@
 import jwt from "jsonwebtoken";
+
 import User from "../models/User.js";
 import Message from "../models/Message.js";
 import Conversation from "../models/Conversation.js";
 
 const socketHandler = (io) => {
-  // ==============================
-  // SOCKET AUTHENTICATION
-  // ==============================
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth?.token;
+      const token =
+        socket.handshake.auth?.token;
 
       if (!token) {
-        console.log("Socket connection rejected: No token");
-        return next(new Error("Authentication required"));
+        return next(
+          new Error("Authentication required")
+        );
       }
 
       const decoded = jwt.verify(
@@ -21,17 +21,19 @@ const socketHandler = (io) => {
         process.env.JWT_SECRET
       );
 
-      const user = await User.findById(decoded.userId);
+      const user = await User.findById(
+        decoded.userId
+      );
 
       if (!user) {
-        console.log(
-          "Socket connection rejected: User not found"
+        return next(
+          new Error("User not found")
         );
-
-        return next(new Error("User not found"));
       }
 
-      socket.userId = user._id.toString();
+      socket.userId =
+        user._id.toString();
+
       socket.user = user;
 
       next();
@@ -41,293 +43,241 @@ const socketHandler = (io) => {
         error.message
       );
 
-      next(new Error("Invalid or expired token"));
+      next(
+        new Error(
+          "Invalid or expired token"
+        )
+      );
     }
   });
 
-  // ==============================
-  // CONNECTION
-  // ==============================
   io.on("connection", async (socket) => {
-    console.log(
-      `User connected: ${socket.user.name}`
-    );
-
-    console.log(
-      `Socket ID: ${socket.id}`
-    );
-
-    // Update online status
-    await User.findByIdAndUpdate(socket.userId, {
-      isOnline: true,
-    });
-
-    // ==============================
-    // PERSONAL USER ROOM
-    // ==============================
-    socket.join(socket.userId);
-
-    console.log(
-      `User room joined: ${socket.userId}`
-    );
-
-    // ==============================
-    // DEBUG: LOG EVERY EVENT
-    // ==============================
-    socket.onAny((event, ...args) => {
+    try {
       console.log(
-        `Socket event received: ${event}`,
-        args
+        `User connected: ${socket.user.name}`
       );
-    });
 
-    // ==============================
-    // JOIN CONVERSATION
-    // ==============================
-    socket.on(
-      "joinConversation",
-      async (conversationId, callback) => {
-        try {
-          console.log(
-            `Join conversation request: ${conversationId}`
-          );
+      console.log(
+        `Socket ID: ${socket.id}`
+      );
 
-          if (!conversationId) {
-            console.log(
-              "No conversation ID provided"
-            );
+      await User.findByIdAndUpdate(
+        socket.userId,
+        {
+          isOnline: true,
+        }
+      );
 
-            if (callback) {
-              callback({
-                success: false,
-                message:
-                  "Conversation ID is required",
-              });
+      socket.join(socket.userId);
+
+      io.emit("userStatus", {
+        userId: socket.userId,
+        isOnline: true,
+      });
+
+      // JOIN CONVERSATION
+      socket.on(
+        "joinConversation",
+        async (conversationId) => {
+          try {
+            if (!conversationId) {
+              return;
             }
 
-            return;
-          }
+            const conversation =
+              await Conversation.findById(
+                conversationId
+              );
 
-          // Find conversation
-          const conversation =
-            await Conversation.findById(
+            if (!conversation) {
+              socket.emit(
+                "messageError",
+                {
+                  message:
+                    "Conversation not found",
+                }
+              );
+
+              return;
+            }
+
+            const isParticipant =
+              conversation.participants.some(
+                (participant) =>
+                  participant.toString() ===
+                  socket.userId
+              );
+
+            if (!isParticipant) {
+              socket.emit(
+                "messageError",
+                {
+                  message:
+                    "You are not a participant in this conversation",
+                }
+              );
+
+              return;
+            }
+
+            socket.join(
               conversationId
             );
 
-          if (!conversation) {
             console.log(
-              "Conversation not found:",
-              conversationId
+              `${socket.user.name} joined conversation ${conversationId}`
             );
-
-            socket.emit("messageError", {
-              message:
-                "Conversation not found",
-            });
-
-            if (callback) {
-              callback({
-                success: false,
-                message:
-                  "Conversation not found",
-              });
-            }
-
-            return;
+          } catch (error) {
+            console.error(
+              "Join conversation error:",
+              error
+            );
           }
+        }
+      );
 
-          // Check participant
-          const isParticipant =
-            conversation.participants.some(
-              (participant) =>
-                participant.toString() ===
-                socket.userId
-            );
-
-          if (!isParticipant) {
-            console.log(
-              `${socket.user.name} is not a participant`
-            );
-
-            socket.emit("messageError", {
-              message:
-                "You are not a participant in this conversation",
-            });
-
-            if (callback) {
-              callback({
-                success: false,
-                message:
-                  "You are not a participant in this conversation",
-              });
-            }
-
-            return;
-          }
-
-          // Join conversation room
-          socket.join(conversationId);
-
-          console.log(
-            `${socket.user.name} joined conversation ${conversationId}`
-          );
-
-          // Send acknowledgement to client
-          if (callback) {
-            callback({
-              success: true,
+      // SEND MESSAGE
+      socket.on(
+        "sendMessage",
+        async (data) => {
+          try {
+            const {
               conversationId,
-            });
-          }
-        } catch (error) {
-          console.error(
-            "Join conversation error:",
-            error
-          );
+              text,
+            } = data || {};
 
-          if (callback) {
-            callback({
-              success: false,
-              message: "Failed to join conversation",
-            });
-          }
-        }
-      }
-    );
+            if (
+              !conversationId ||
+              !text?.trim()
+            ) {
+              socket.emit(
+                "messageError",
+                {
+                  message:
+                    "Conversation ID and message text are required",
+                }
+              );
 
-    // ==============================
-    // SEND MESSAGE
-    // ==============================
-    socket.on(
-      "sendMessage",
-      async (data) => {
-        try {
-          console.log(
-            "sendMessage received:",
-            data
-          );
+              return;
+            }
 
-          const {
-            conversationId,
-            text,
-          } = data || {};
+            const conversation =
+              await Conversation.findById(
+                conversationId
+              );
 
-          if (
-            !conversationId ||
-            !text?.trim()
-          ) {
-            socket.emit("messageError", {
-              message:
-                "Conversation ID and message text are required",
-            });
+            if (!conversation) {
+              socket.emit(
+                "messageError",
+                {
+                  message:
+                    "Conversation not found",
+                }
+              );
 
-            return;
-          }
+              return;
+            }
 
-          // Find conversation
-          const conversation =
-            await Conversation.findById(
+            const isParticipant =
+              conversation.participants.some(
+                (participant) =>
+                  participant.toString() ===
+                  socket.userId
+              );
+
+            if (!isParticipant) {
+              socket.emit(
+                "messageError",
+                {
+                  message:
+                    "You are not a participant in this conversation",
+                }
+              );
+
+              return;
+            }
+
+            const message =
+              await Message.create({
+                conversation:
+                  conversationId,
+                sender: socket.userId,
+                text: text.trim(),
+              });
+
+            conversation.lastMessage =
+              message._id;
+
+            await conversation.save();
+
+            await message.populate(
+              "sender",
+              "name email avatar"
+            );
+
+            io.to(
               conversationId
+            ).emit(
+              "newMessage",
+              message
             );
 
-          if (!conversation) {
-            socket.emit("messageError", {
-              message:
-                "Conversation not found",
-            });
-
-            return;
-          }
-
-          // Check participant
-          const isParticipant =
-            conversation.participants.some(
-              (participant) =>
-                participant.toString() ===
-                socket.userId
+            console.log(
+              `Message emitted to conversation ${conversationId}`
+            );
+          } catch (error) {
+            console.error(
+              "Socket message error:",
+              error
             );
 
-          if (!isParticipant) {
-            socket.emit("messageError", {
-              message:
-                "You are not a participant in this conversation",
-            });
-
-            return;
+            socket.emit(
+              "messageError",
+              {
+                message:
+                  "Failed to send message",
+              }
+            );
           }
-
-          // Make sure sender is inside
-          // the conversation room
-          socket.join(conversationId);
-
-          // Create message
-          const message =
-            await Message.create({
-              conversation: conversationId,
-              sender: socket.userId,
-              text: text.trim(),
-            });
-
-          // Update last message
-          conversation.lastMessage =
-            message._id;
-
-          await conversation.save();
-
-          // Populate sender
-          await message.populate(
-            "sender",
-            "name email avatar"
-          );
-
-          console.log(
-            "Message saved:",
-            message._id
-          );
-
-          // Emit message to everyone
-          // inside the conversation room
-          io.to(conversationId).emit(
-            "newMessage",
-            message
-          );
-
-          console.log(
-            `Message emitted to conversation ${conversationId}`
-          );
-        } catch (error) {
-          console.error(
-            "Socket message error:",
-            error
-          );
-
-          socket.emit("messageError", {
-            message:
-              "Failed to send message",
-          });
         }
-      }
-    );
+      );
 
-    // ==============================
-    // DISCONNECT
-    // ==============================
-    socket.on(
-      "disconnect",
-      async () => {
-        console.log(
-          `User disconnected: ${socket.user.name}`
-        );
+      // DISCONNECT
+      socket.on(
+        "disconnect",
+        async () => {
+          try {
+            console.log(
+              `User disconnected: ${socket.user.name}`
+            );
 
-        await User.findByIdAndUpdate(
-          socket.userId,
-          {
-            isOnline: false,
-            lastSeen: new Date(),
+            await User.findByIdAndUpdate(
+              socket.userId,
+              {
+                isOnline: false,
+                lastSeen: new Date(),
+              }
+            );
+
+            io.emit("userStatus", {
+              userId: socket.userId,
+              isOnline: false,
+              lastSeen: new Date(),
+            });
+          } catch (error) {
+            console.error(
+              "Disconnect error:",
+              error
+            );
           }
-        );
-      }
-    );
+        }
+      );
+    } catch (error) {
+      console.error(
+        "Socket connection error:",
+        error
+      );
+    }
   });
 };
 

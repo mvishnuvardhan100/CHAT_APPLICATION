@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-function Login({ onRegister }) {
-  const { login } = useAuth();
+function Register({ onLogin }) {
+  const { register } = useAuth();
 
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -17,11 +18,15 @@ function Login({ onRegister }) {
     setLoading(true);
 
     try {
-      await login(email, password);
+      await register(
+        name,
+        email,
+        password
+      );
     } catch (error) {
       setError(
         error.response?.data?.message ||
-          "Login failed"
+          "Registration failed"
       );
     } finally {
       setLoading(false);
@@ -30,16 +35,16 @@ function Login({ onRegister }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-
       <div className="w-full max-w-md rounded-2xl bg-gray-900 p-8 shadow-xl">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold">
+            Create Account
+          </h1>
 
-        <h1 className="mb-2 text-3xl font-bold">
-          Welcome Back
-        </h1>
-
-        <p className="mb-8 text-gray-400">
-          Login to continue chatting.
-        </p>
+          <p className="mt-2 text-gray-400">
+            Join the conversation.
+          </p>
+        </div>
 
         {error && (
           <div className="mb-5 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
@@ -51,6 +56,22 @@ function Login({ onRegister }) {
           onSubmit={handleSubmit}
           className="space-y-5"
         >
+          <div>
+            <label className="mb-2 block text-sm text-gray-300">
+              Name
+            </label>
+
+            <input
+              type="text"
+              value={name}
+              onChange={(e) =>
+                setName(e.target.value)
+              }
+              placeholder="Vishnu"
+              required
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
+            />
+          </div>
 
           <div>
             <label className="mb-2 block text-sm text-gray-300">
@@ -63,9 +84,9 @@ function Login({ onRegister }) {
               onChange={(e) =>
                 setEmail(e.target.value)
               }
-              placeholder="rahul@test.com"
+              placeholder="vishnu@test.com"
               required
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none transition focus:border-blue-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
             />
           </div>
 
@@ -82,39 +103,34 @@ function Login({ onRegister }) {
               }
               placeholder="••••••••"
               required
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none transition focus:border-blue-500"
+              minLength={6}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 py-3 font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-lg bg-blue-600 py-3 font-semibold hover:bg-blue-700 disabled:opacity-50"
           >
             {loading
-              ? "Logging in..."
-              : "Login"}
+              ? "Creating account..."
+              : "Register"}
           </button>
-
         </form>
 
-        {/* Register */}
-        <div className="mt-6 text-center text-sm text-gray-400">
-          Don't have an account?{" "}
-
+        <p className="mt-6 text-center text-sm text-gray-400">
+          Already have an account?{" "}
           <button
-            type="button"
-            onClick={onRegister}
-            className="font-semibold text-blue-400 transition hover:text-blue-300"
+            onClick={onLogin}
+            className="font-semibold text-blue-400 hover:text-blue-300"
           >
-            Register
+            Login
           </button>
-        </div>
-
+        </p>
       </div>
-
     </div>
   );
 }
 
-export default Login;
+export default Register;

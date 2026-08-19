@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { io } from "socket.io-client";
+
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 
@@ -8,16 +14,22 @@ const SOCKET_URL = "http://localhost:5000";
 function Dashboard() {
   const { user, logout } = useAuth();
 
+  const socketRef = useRef(null);
+  const conversationRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [conversation, setConversation] = useState(null);
+  const [selectedUser, setSelectedUser] =
+    useState(null);
+  const [conversation, setConversation] =
+    useState(null);
+
   const [messages, setMessages] = useState([]);
+  const [messageText, setMessageText] =
+    useState("");
 
-  const [messageText, setMessageText] = useState("");
-
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const [loadingConversation, setLoadingConversation] =
-    useState(false);
+  const [loadingUsers, setLoadingUsers] =
+    useState(true);
   const [loadingMessages, setLoadingMessages] =
     useState(false);
 
@@ -25,10 +37,19 @@ function Dashboard() {
   const [socketStatus, setSocketStatus] =
     useState("Connecting...");
 
-  const socketRef = useRef(null);
+  useEffect(() => {
+    conversationRef.current =
+      conversation;
+  }, [conversation]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }, [messages]);
 
   // ==========================================
-  // CONNECT SOCKET.IO
+  // SOCKET CONNECTION
   // ==========================================
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -52,11 +73,21 @@ function Dashboard() {
       );
 
       setSocketStatus("Connected");
+
+      const currentConversation =
+        conversationRef.current;
+
+      if (currentConversation) {
+        socket.emit(
+          "joinConversation",
+          currentConversation._id
+        );
+      }
     });
 
     socket.on("connect_error", (error) => {
       console.error(
-        "Socket connection error:",
+        "Socket error:",
         error.message
       );
 
@@ -64,48 +95,38 @@ function Dashboard() {
     });
 
     socket.on("disconnect", () => {
-      console.log("Socket disconnected");
-
       setSocketStatus("Disconnected");
     });
 
-    // ========================================
-    // RECEIVE NEW MESSAGE
-    // ========================================
     socket.on("newMessage", (message) => {
-      console.log(
-        "New message received:",
-        message
-      );
+      const currentConversation =
+        conversationRef.current;
 
-      setMessages((previousMessages) => {
-        // Prevent duplicate messages
-        const alreadyExists =
-          previousMessages.some(
-            (existingMessage) =>
-              existingMessage._id ===
-              message._id
-          );
+      if (
+        !currentConversation ||
+        message.conversation !==
+          currentConversation._id
+      ) {
+        return;
+      }
 
-        if (alreadyExists) {
-          return previousMessages;
+      setMessages((previous) => {
+        const exists = previous.some(
+          (item) =>
+            item._id === message._id
+        );
+
+        if (exists) {
+          return previous;
         }
 
-        return [
-          ...previousMessages,
-          message,
-        ];
+        return [...previous, message];
       });
     });
 
-    socket.on("messageError", (error) => {
-      console.error(
-        "Message error:",
-        error
-      );
-
+    socket.on("messageError", (data) => {
       setError(
-        error.message ||
+        data?.message ||
           "Failed to send message"
       );
     });
@@ -123,17 +144,13 @@ function Dashboard() {
     const fetchUsers = async () => {
       try {
         setLoadingUsers(true);
-        setError("");
 
-        const response = await api.get("/users");
+        const response = await api.get(
+          "/users"
+        );
 
         setUsers(response.data.users);
       } catch (error) {
-        console.error(
-          "Failed to fetch users:",
-          error
-        );
-
         setError(
           error.response?.data?.message ||
             "Failed to load users"
@@ -149,16 +166,16 @@ function Dashboard() {
   // ==========================================
   // SELECT USER
   // ==========================================
-  const handleSelectUser = async (otherUser) => {
+  const handleSelectUser = async (
+    otherUser
+  ) => {
     try {
       setSelectedUser(otherUser);
       setConversation(null);
       setMessages([]);
       setMessageText("");
-
-      setLoadingConversation(true);
-      setLoadingMessages(false);
       setError("");
+      setLoadingMessages(true);
 
       const response = await api.post(
         "/conversations",
@@ -170,60 +187,35 @@ function Dashboard() {
       const newConversation =
         response.data.conversation;
 
-      setConversation(newConversation);
+      setConversation(
+        newConversation
+      );
 
-      // Join Socket.IO conversation room
+      conversationRef.current =
+        newConversation;
+
       if (socketRef.current?.connected) {
-        console.log(
-          "Joining conversation:",
-          newConversation._id
-        );
-
         socketRef.current.emit(
           "joinConversation",
           newConversation._id
         );
       }
 
-      // ========================================
-      // FETCH MESSAGE HISTORY
-      // ========================================
-      try {
-        setLoadingMessages(true);
-
-        const messageResponse =
-          await api.get(
-            `/conversations/${newConversation._id}/messages`
-          );
-
-        setMessages(
-          messageResponse.data.messages
-        );
-      } catch (error) {
-        console.error(
-          "Failed to load messages:",
-          error
+      const messageResponse =
+        await api.get(
+          `/conversations/${newConversation._id}/messages`
         );
 
-        setError(
-          error.response?.data?.message ||
-            "Failed to load messages"
-        );
-      } finally {
-        setLoadingMessages(false);
-      }
-    } catch (error) {
-      console.error(
-        "Failed to get conversation:",
-        error
+      setMessages(
+        messageResponse.data.messages
       );
-
+    } catch (error) {
       setError(
         error.response?.data?.message ||
           "Failed to open conversation"
       );
     } finally {
-      setLoadingConversation(false);
+      setLoadingMessages(false);
     }
   };
 
@@ -249,11 +241,6 @@ function Dashboard() {
       return;
     }
 
-    console.log(
-      "Sending message:",
-      text
-    );
-
     socketRef.current.emit(
       "sendMessage",
       {
@@ -263,44 +250,41 @@ function Dashboard() {
       }
     );
 
-    // Clear input
     setMessageText("");
+    setError("");
   };
 
-  // ==========================================
-  // ENTER KEY
-  // ==========================================
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       handleSendMessage();
     }
   };
 
-  // ==========================================
-  // UI
-  // ==========================================
+  const formatTime = (date) => {
+    return new Date(
+      date
+    ).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-
-      {/* ======================================
-          HEADER
-      ====================================== */}
-      <header className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
-
+      {/* HEADER */}
+      <header className="flex items-center justify-between border-b border-gray-800 bg-gray-900 px-6 py-4">
         <h1 className="text-2xl font-bold">
           Chat App
         </h1>
 
         <div className="flex items-center gap-4">
-
           <div className="text-right">
             <p className="font-semibold">
               {user?.name}
             </p>
 
-            <p className="text-sm text-gray-400">
+            <p className="text-xs text-gray-400">
               {user?.email}
             </p>
 
@@ -317,25 +301,16 @@ function Dashboard() {
 
           <button
             onClick={logout}
-            className="rounded-lg bg-red-600 px-4 py-2 font-medium transition hover:bg-red-700"
+            className="rounded-lg bg-red-600 px-4 py-2 font-semibold hover:bg-red-700"
           >
             Logout
           </button>
-
         </div>
-
       </header>
 
-      {/* ======================================
-          MAIN
-      ====================================== */}
-      <main className="flex min-h-[calc(100vh-73px)]">
-
-        {/* ====================================
-            SIDEBAR
-        ==================================== */}
-        <aside className="w-80 border-r border-gray-800 bg-gray-900 p-5">
-
+      <main className="flex h-[calc(100vh-73px)]">
+        {/* SIDEBAR */}
+        <aside className="w-80 shrink-0 overflow-y-auto border-r border-gray-800 bg-gray-900 p-4">
           <h2 className="mb-4 text-lg font-semibold">
             Users
           </h2>
@@ -353,7 +328,6 @@ function Dashboard() {
           )}
 
           {!loadingUsers &&
-            !error &&
             users.length === 0 && (
               <p className="text-sm text-gray-400">
                 No other users found.
@@ -361,9 +335,8 @@ function Dashboard() {
             )}
 
           <div className="space-y-2">
-
             {users.map((otherUser) => {
-              const isSelected =
+              const selected =
                 selectedUser?._id ===
                 otherUser._id;
 
@@ -376,55 +349,43 @@ function Dashboard() {
                     )
                   }
                   className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition ${
-                    isSelected
+                    selected
                       ? "bg-blue-600"
                       : "hover:bg-gray-800"
                   }`}
                 >
-
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-500 text-lg font-semibold">
+                  <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-500 font-semibold">
                     {otherUser.name
                       ?.charAt(0)
                       .toUpperCase()}
+
+                    {otherUser.isOnline && (
+                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-gray-900 bg-green-500" />
+                    )}
                   </div>
 
                   <div className="min-w-0">
-
                     <p className="font-semibold">
                       {otherUser.name}
                     </p>
 
-                    <p
-                      className={`truncate text-sm ${
-                        isSelected
-                          ? "text-blue-100"
-                          : "text-gray-400"
-                      }`}
-                    >
-                      {otherUser.email}
+                    <p className="truncate text-xs text-gray-400">
+                      {otherUser.isOnline
+                        ? "Online"
+                        : "Offline"}
                     </p>
-
                   </div>
-
                 </button>
               );
             })}
-
           </div>
-
         </aside>
 
-        {/* ====================================
-            CHAT AREA
-        ==================================== */}
-        <section className="flex flex-1 flex-col">
-
-          {/* No user selected */}
+        {/* CHAT */}
+        <section className="flex min-w-0 flex-1 flex-col">
           {!selectedUser && (
             <div className="flex flex-1 items-center justify-center">
-
               <div className="text-center">
-
                 <div className="mb-4 text-5xl">
                   💬
                 </div>
@@ -434,62 +395,47 @@ function Dashboard() {
                 </h2>
 
                 <p className="mt-2 text-gray-400">
-                  Select a user to start chatting.
+                  Select a user to start
+                  chatting.
                 </p>
-
               </div>
-
             </div>
           )}
 
-          {/* User selected */}
           {selectedUser && (
             <>
-              {/* Chat header */}
+              {/* CHAT HEADER */}
               <div className="flex items-center gap-3 border-b border-gray-800 bg-gray-900 px-6 py-4">
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-lg font-semibold">
+                <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-semibold">
                   {selectedUser.name
                     ?.charAt(0)
                     .toUpperCase()}
                 </div>
 
                 <div>
-
                   <h2 className="font-semibold">
                     {selectedUser.name}
                   </h2>
 
-                  <p className="text-sm text-gray-400">
-                    {selectedUser.email}
+                  <p className="text-xs text-gray-400">
+                    {selectedUser.isOnline
+                      ? "Online"
+                      : selectedUser.email}
                   </p>
-
                 </div>
-
               </div>
 
-              {/* Messages */}
+              {/* MESSAGES */}
               <div className="flex-1 overflow-y-auto p-6">
-
-                {loadingConversation && (
+                {loadingMessages && (
                   <div className="flex h-full items-center justify-center">
                     <p className="text-gray-400">
-                      Opening conversation...
+                      Loading messages...
                     </p>
                   </div>
                 )}
 
-                {!loadingConversation &&
-                  loadingMessages && (
-                    <div className="flex h-full items-center justify-center">
-                      <p className="text-gray-400">
-                        Loading messages...
-                      </p>
-                    </div>
-                  )}
-
-                {!loadingConversation &&
-                  !loadingMessages &&
+                {!loadingMessages &&
                   messages.length === 0 && (
                     <div className="flex h-full items-center justify-center">
                       <div className="text-center">
@@ -508,92 +454,68 @@ function Dashboard() {
                     </div>
                   )}
 
-                {!loadingConversation &&
-                  !loadingMessages &&
-                  messages.length > 0 && (
-                    <div className="space-y-4">
+                <div className="space-y-3">
+                  {messages.map((message) => {
+                    const senderId =
+                      message.sender?._id ||
+                      message.sender;
 
-                      {messages.map(
-                        (message) => {
-                          const senderId =
-                            message.sender?._id ||
-                            message.sender;
+                    const currentUserId =
+                      user?._id ||
+                      user?.id;
 
-                          const currentUserId =
-                            user?._id ||
-                            user?.id;
+                    const own =
+                      senderId ===
+                      currentUserId;
 
-                          const isOwnMessage =
-                            senderId ===
-                            currentUserId;
+                    return (
+                      <div
+                        key={message._id}
+                        className={`flex ${
+                          own
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                            own
+                              ? "rounded-br-sm bg-blue-600"
+                              : "rounded-bl-sm bg-gray-800"
+                          }`}
+                        >
+                          <p className="break-words text-sm">
+                            {message.text}
+                          </p>
 
-                          return (
-                            <div
-                              key={
-                                message._id
-                              }
-                              className={`flex ${
-                                isOwnMessage
-                                  ? "justify-end"
-                                  : "justify-start"
-                              }`}
-                            >
+                          <p className="mt-1 text-right text-[10px] opacity-60">
+                            {formatTime(
+                              message.createdAt
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
 
-                              <div
-                                className={`max-w-md rounded-2xl px-4 py-3 ${
-                                  isOwnMessage
-                                    ? "bg-blue-600"
-                                    : "bg-gray-800"
-                                }`}
-                              >
-
-                                <p className="text-sm">
-                                  {message.text}
-                                </p>
-
-                                <p className="mt-1 text-xs opacity-60">
-                                  {new Date(
-                                    message.createdAt
-                                  ).toLocaleTimeString(
-                                    [],
-                                    {
-                                      hour: "2-digit",
-                                      minute:
-                                        "2-digit",
-                                    }
-                                  )}
-                                </p>
-
-                              </div>
-
-                            </div>
-                          );
-                        }
-                      )}
-
-                    </div>
-                  )}
-
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
 
-              {/* =================================
-                  MESSAGE INPUT
-              ================================= */}
+              {/* INPUT */}
               <div className="border-t border-gray-800 bg-gray-900 p-4">
-
                 <div className="flex gap-3">
-
-                  <input
-                    type="text"
+                  <textarea
+                    rows="1"
                     value={messageText}
-                    onChange={(event) =>
+                    onChange={(e) =>
                       setMessageText(
-                        event.target.value
+                        e.target.value
                       )
                     }
                     onKeyDown={handleKeyDown}
                     placeholder="Type a message..."
-                    className="flex-1 rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-white outline-none placeholder:text-gray-500 focus:border-blue-500"
+                    className="max-h-32 min-h-[48px] flex-1 resize-none rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 outline-none placeholder:text-gray-500 focus:border-blue-500"
                   />
 
                   <button
@@ -602,27 +524,23 @@ function Dashboard() {
                     }
                     disabled={
                       !messageText.trim() ||
-                      !conversation ||
                       socketStatus !==
                         "Connected"
                     }
-                    className="rounded-xl bg-blue-600 px-6 py-3 font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-xl bg-blue-600 px-6 font-semibold hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Send
                   </button>
-
                 </div>
 
                 <p className="mt-2 text-xs text-gray-500">
-                  Press Enter to send
+                  Enter to send • Shift + Enter
+                  for a new line
                 </p>
-
               </div>
             </>
           )}
-
         </section>
-
       </main>
     </div>
   );

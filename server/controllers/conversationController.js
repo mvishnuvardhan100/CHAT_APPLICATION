@@ -1,9 +1,6 @@
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 
-// ==========================================
-// CREATE OR GET CONVERSATION
-// ==========================================
 export const createOrGetConversation = async (
   req,
   res
@@ -25,7 +22,6 @@ export const createOrGetConversation = async (
       });
     }
 
-    // Check if conversation already exists
     let conversation =
       await Conversation.findOne({
         participants: {
@@ -37,7 +33,6 @@ export const createOrGetConversation = async (
         "-password"
       );
 
-    // Create if it doesn't exist
     if (!conversation) {
       conversation =
         await Conversation.create({
@@ -69,9 +64,6 @@ export const createOrGetConversation = async (
   }
 };
 
-// ==========================================
-// GET ALL CONVERSATIONS
-// ==========================================
 export const getMyConversations = async (
   req,
   res
@@ -103,9 +95,6 @@ export const getMyConversations = async (
   }
 };
 
-// ==========================================
-// GET MESSAGES FOR A CONVERSATION
-// ==========================================
 export const getMessages = async (
   req,
   res
@@ -113,7 +102,6 @@ export const getMessages = async (
   try {
     const { conversationId } = req.params;
 
-    // Find conversation
     const conversation =
       await Conversation.findById(
         conversationId
@@ -125,8 +113,6 @@ export const getMessages = async (
       });
     }
 
-    // Check whether the logged-in user
-    // is a participant
     const isParticipant =
       conversation.participants.some(
         (participant) =>
@@ -141,7 +127,6 @@ export const getMessages = async (
       });
     }
 
-    // Get messages
     const messages =
       await Message.find({
         conversation: conversationId,
@@ -150,9 +135,7 @@ export const getMessages = async (
           "sender",
           "name email avatar"
         )
-        .sort({
-          createdAt: 1,
-        });
+        .sort({ createdAt: 1 });
 
     res.status(200).json({
       messages,
